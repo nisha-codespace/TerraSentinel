@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
 #include "DHT.h"
 
 #define DHTPIN 15
@@ -11,28 +12,33 @@ DHT dht(DHTPIN, DHTTYPE);
 const char* ssid = "Wokwi-GUEST";
 const char* password = "";
 
+// TerraSentinel FastAPI public endpoint
+const char* serverURL =
+    "https://clara-crucial-baths-butter.trycloudflare.com/sensor-data";
 
 void setup() {
   Serial.begin(115200);
-  WiFi.begin(ssid, password);
 
-Serial.print("Connecting to WiFi");
-
-while (WiFi.status() != WL_CONNECTED) {
-  delay(500);
-  Serial.print(".");
-}
-
-Serial.println();
-Serial.println("WiFi Connected!");
-Serial.print("IP Address: ");
-Serial.println(WiFi.localIP());
   dht.begin();
   analogReadResolution(12);
 
   Serial.println("================================");
   Serial.println("   TerraSentinel Sensor Node");
   Serial.println("================================");
+
+  WiFi.begin(ssid, password);
+
+  Serial.print("Connecting to WiFi");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("WiFi Connected!");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
 }
 
 void loop() {
@@ -47,38 +53,7 @@ void loop() {
     return;
   }
 
-  // Simple prototype risk calculation
-  int fireRisk = 0;
-  int pollutionRisk = 0;
-
-  // Fire risk
-  if (temperature > 35) {
-    fireRisk += 40;
-  }
-
-  if (humidity < 40) {
-    fireRisk += 30;
-  }
-
-  if (gasRaw > 2000) {
-    fireRisk += 30;
-  }
-
-  // Pollution risk
-  if (gasRaw > 1500) {
-    pollutionRisk += 50;
-  }
-
-  if (gasRaw > 2500) {
-    pollutionRisk += 50;
-  }
-
-  if (fireRisk > 100) fireRisk = 100;
-  if (pollutionRisk > 100) pollutionRisk = 100;
-
-  // Display sensor data
   Serial.println("--------------------------------");
-
   Serial.print("Temperature : ");
   Serial.print(temperature);
   Serial.println(" C");
@@ -90,24 +65,49 @@ void loop() {
   Serial.print("Gas Raw     : ");
   Serial.println(gasRaw);
 
-  Serial.print("Fire Risk   : ");
-  Serial.print(fireRisk);
-  Serial.println(" %");
+  // Send data to FastAPI
+  if (WiFi.status() == WL_CONNECTED) {
 
-  Serial.print("Pollution Risk : ");
-  Serial.print(pollutionRisk);
-  Serial.println(" %");
+    HTTPClient http;
 
-  // Alert
-  if (fireRisk >= 70 || pollutionRisk >= 70) {
-    Serial.println("!!! ALERT: HIGH ENVIRONMENTAL RISK !!!");
-  }
-  else if (fireRisk >= 40 || pollutionRisk >= 40) {
-    Serial.println("WARNING: Environmental risk detected.");
-  }
-  else {
-    Serial.println("STATUS: Environment normal.");
+    http.begin(serverURL);
+    http.addHeader("Content-Type", "application/json");
+
+    String jsonData = "{";
+    jsonData += "\"temperature\":" + String(temperature, 2) + ",";
+    jsonData += "\"humidity\":" + String(humidity, 2) + ",";
+    jsonData += "\"gas\":" + String(gasRaw);
+    jsonData += "}";
+
+    Serial.println("Sending data to TerraSentinel API...");
+    Serial.println(jsonData);
+
+    int httpResponseCode = http.POST(jsonData);
+
+    Serial.print("HTTP Response Code: ");
+    Serial.println(httpResponseCode);
+
+    if (httpResponseCode > 0) {
+
+      String response = http.getString();
+
+      Serial.println("API Response:");
+      Serial.println(response);
+
+    } else {
+
+      Serial.print("Error sending data: ");
+      Serial.println(http.errorToString(httpResponseCode));
+
+    }
+
+    http.end();
+
+  } else {
+
+    Serial.println("WiFi disconnected!");
+
   }
 
-  delay(2000);
+  delay(5000);
 }
